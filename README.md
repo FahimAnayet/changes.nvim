@@ -10,7 +10,7 @@
 
 ```lua
 {
-  'your-username/changes.nvim',
+  'FahimAnayet/changes.nvim',
   config = function()
     require('changes').setup({
       -- Configuration options
@@ -194,3 +194,4 @@ vim.keymap.set('n', '<leader>cv', '<cmd>ChangesDiff<cr>')
 This modern Lua implementation provides all the core functionality of the original changesPlugin.
 
 > ### <span style='color: red;'>This will never update in future.</span>
+> This README is written by ChatGPT
