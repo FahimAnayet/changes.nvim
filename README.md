@@ -172,13 +172,17 @@ require('changes').setup({
   }
 
 })
+```
 
+```lua
 -- Apply neon preset (includes bright cyan for modifications)
 :ChangesColorPreset neon
 
 -- Or programmatically
 require('changes').apply_preset('neon')
+```
 
+```lua
 -- Custom keybindings
 vim.keymap.set('n', '<leader>ce', '<cmd>ChangesEnable<cr>')
 vim.keymap.set('n', '<leader>cd', '<cmd>ChangesDisable<cr>')
