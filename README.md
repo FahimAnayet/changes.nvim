@@ -1,5 +1,7 @@
+# Shamelessly Stole from [Here](https://github.com/chrisbra/changesPlugin)
+
 # Changes plugin [![Say Thanks!](https://img.shields.io/badge/Say%20Thanks-!-1EAEDB.svg)](https://saythanks.io/to/cb%40256bit.org)
-> A Vim plugin for displaying changes in a buffer
+> A NeoVim plugin for displaying changes in a buffer
 
 This plugin was written to help visualize which lines have been changed since
 editing started for a file. The plugin was inspired by so called changed-bars,
