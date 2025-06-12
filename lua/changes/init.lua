@@ -133,53 +133,47 @@ end
 local function calculate_diff(original_lines, current_lines)
   local changes = {}
   
-  -- Use vim's diff algorithm
-  local original_file = vim.fn.tempname()
-  local current_file = vim.fn.tempname()
+  if not original_lines or not current_lines then
+    return changes
+  end
   
-  vim.fn.writefile(original_lines or {}, original_file)
-  vim.fn.writefile(current_lines, current_file)
+  -- Simple line-by-line comparison for now
+  -- This is more reliable than external diff command
+  local max_lines = math.max(#original_lines, #current_lines)
   
-  local diff_cmd = {'diff', '-u', original_file, current_file}
-  local result = vim.system(diff_cmd, { text = true }):wait()
-  
-  -- Clean up temp files
-  vim.fn.delete(original_file)
-  vim.fn.delete(current_file)
-  
-  if result.stdout then
-    local lines = vim.split(result.stdout, '\n')
-    local current_line = 0
+  for i = 1, max_lines do
+    local original_line = original_lines[i] or ''
+    local current_line = current_lines[i] or ''
     
-    for _, line in ipairs(lines) do
-      if line:match('^@@') then
-        local new_start = line:match('%+(%d+)')
-        if new_start then
-          current_line = tonumber(new_start)
-        end
-      elseif line:match('^%-') then
-        -- Deleted line
-        if current_line > 0 then
-          changes[current_line] = 'delete'
-        end
-      elseif line:match('^%+') then
-        -- Added line
-        changes[current_line] = 'add'
-        current_line = current_line + 1
-      elseif line:match('^%s') then
-        -- Unchanged line (context)
-        current_line = current_line + 1
+    if i > #original_lines then
+      -- Line was added
+      changes[i] = 'add'
+    elseif i > #current_lines then
+      -- Line was deleted (mark the previous line)
+      if i > 1 then
+        changes[i - 1] = 'delete'
       end
+    elseif original_line ~= current_line then
+      -- Line was modified
+      changes[i] = 'modified'
     end
   end
   
-  return changes
+  -- Remove any invalid line numbers (should be >= 1)
+  local valid_changes = {}
+  for line_num, change_type in pairs(changes) do
+    if line_num >= 1 and line_num <= #current_lines then
+      valid_changes[line_num] = change_type
+    end
+  end
+  
+  return valid_changes
 end
 
 -- Place signs for changes
 local function place_signs(bufnr, changes)
-  -- Clear existing signs
-  vim.fn.sign_unplace(state.sign_group, { buffer = bufnr })
+  -- Clear existing signs for this group and buffer
+  pcall(vim.fn.sign_unplace, state.sign_group, { buffer = bufnr })
   
   for line_num, change_type in pairs(changes) do
     local sign_name
@@ -191,10 +185,16 @@ local function place_signs(bufnr, changes)
       sign_name = 'ChangesModified'
     end
     
-    vim.fn.sign_place(0, state.sign_group, sign_name, bufnr, {
+    -- Use pcall to handle any sign placement errors gracefully
+    local ok, err = pcall(vim.fn.sign_place, 0, state.sign_group, sign_name, bufnr, {
       lnum = line_num,
       priority = 10
     })
+    
+    if not ok then
+      -- If sign placement fails, try without priority (for older Vim versions)
+      pcall(vim.fn.sign_place, 0, state.sign_group, sign_name, bufnr, { lnum = line_num })
+    end
   end
 end
 
@@ -206,7 +206,17 @@ local function update_changes(bufnr)
     return
   end
   
-  local current_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  -- Check if buffer is valid
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    M.disable(bufnr)
+    return
+  end
+  
+  local ok, current_lines = pcall(vim.api.nvim_buf_get_lines, bufnr, 0, -1, false)
+  if not ok then
+    return
+  end
+  
   local original_lines = state.original_content[bufnr]
   
   if not original_lines then
@@ -214,12 +224,20 @@ local function update_changes(bufnr)
     if original_lines then
       state.original_content[bufnr] = original_lines
     else
+      -- No original content available, can't show changes
       return
     end
   end
   
   local changes = calculate_diff(original_lines, current_lines)
-  place_signs(bufnr, changes)
+  
+  -- Only place signs if we have valid changes
+  if next(changes) then
+    place_signs(bufnr, changes)
+  else
+    -- Clear signs if no changes
+    pcall(vim.fn.sign_unplace, state.sign_group, { buffer = bufnr })
+  end
 end
 
 -- Enable changes tracking for buffer
@@ -230,12 +248,20 @@ function M.enable(bufnr)
     return
   end
   
+  -- Make sure signs are initialized
+  init_signs()
+  
   state.enabled_buffers[bufnr] = true
   
   -- Store original content
   local original_content = get_original_content(bufnr)
   if original_content then
     state.original_content[bufnr] = original_content
+  else
+    -- If we can't get original content, notify user and disable
+    vim.notify('changes.nvim: Cannot read original file content for comparison', vim.log.levels.WARN)
+    state.enabled_buffers[bufnr] = nil
+    return
   end
   
   -- Set up autocommands for this buffer
@@ -261,7 +287,9 @@ function M.enable(bufnr)
         if new_original then
           state.original_content[bufnr] = new_original
         end
-        update_changes(bufnr)
+        vim.schedule(function()
+          update_changes(bufnr)
+        end)
       end,
     })
     
@@ -275,7 +303,9 @@ function M.enable(bufnr)
   end
   
   -- Initial update
-  update_changes(bufnr)
+  vim.schedule(function()
+    update_changes(bufnr)
+  end)
 end
 
 -- Disable changes tracking for buffer
