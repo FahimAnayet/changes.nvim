@@ -1,5 +1,9 @@
 # Shamelessly Stole from [Here](https://github.com/chrisbra/changesPlugin)
 
+
+
+
+
 ## Installation
 
 ### Using lazy.nvim
@@ -160,7 +164,20 @@ require('changes').setup({
   add_sign = '▎',
   delete_sign = '▎',
   modified_sign = '▎',
+
+  custom_colors = {
+    add = { fg = "#00ffff", bg = "NONE", bold = true },
+    delete = { fg = "#ff0000", bg = "NONE" },
+    modified = { fg = "#ffff00", bg = "NONE" }
+  }
+
 })
+
+-- Apply neon preset (includes bright cyan for modifications)
+:ChangesColorPreset neon
+
+-- Or programmatically
+require('changes').apply_preset('neon')
 
 -- Custom keybindings
 vim.keymap.set('n', '<leader>ce', '<cmd>ChangesEnable<cr>')

@@ -1,5 +1,5 @@
 -- changes.nvim - A Neovim plugin for displaying buffer changes
--- Lua port of chrisbra/changesPlugin
+-- Lua port of chrisbra/changesPlugin with enhanced color customization
 
 local M = {}
 
@@ -19,6 +19,18 @@ local config = {
   utf8_add_sign = '➕',
   utf8_delete_sign = '➖',
   utf8_modified_sign = '★',
+  -- Enhanced color configuration
+  colors = {
+    add = 'DiffAdd',        -- Default highlight group for additions
+    delete = 'DiffDelete',  -- Default highlight group for deletions
+    modified = 'DiffChange' -- Default highlight group for modifications
+  },
+  -- Custom color definitions (hex colors or highlight attributes)
+  custom_colors = {
+    -- Example: add = { fg = "#00ff00", bg = "NONE" }
+    -- Example: delete = { fg = "#ff0000", bg = "NONE" }
+    -- Example: modified = { fg = "#00ffff", bg = "NONE" }
+  }
 }
 
 -- State management
@@ -27,17 +39,47 @@ local state = {
   original_content = {},
   sign_group = 'changes_nvim',
   namespace = vim.api.nvim_create_namespace('changes_nvim'),
+  highlight_groups_created = false,
 }
 
 -- Sign definitions
 local signs = {
-  add = { name = 'ChangesAdd', text = '+', texthl = 'DiffAdd' },
-  delete = { name = 'ChangesDelete', text = '-', texthl = 'DiffDelete' },
-  modified = { name = 'ChangesModified', text = '*', texthl = 'DiffChange' },
+  add = { name = 'ChangesAdd', text = '+', texthl = 'ChangesAddHL' },
+  delete = { name = 'ChangesDelete', text = '-', texthl = 'ChangesDeleteHL' },
+  modified = { name = 'ChangesModified', text = '*', texthl = 'ChangesModifiedHL' },
 }
+
+-- Create custom highlight groups
+local function create_highlight_groups()
+  if state.highlight_groups_created then
+    return
+  end
+  
+  -- Create highlight groups for each change type
+  local change_types = { 'add', 'delete', 'modified' }
+  
+  for _, change_type in ipairs(change_types) do
+    local hl_name = 'Changes' .. change_type:gsub("^%l", string.upper) .. 'HL'
+    
+    if config.custom_colors[change_type] then
+      -- Use custom color definition
+      local color_def = config.custom_colors[change_type]
+      vim.api.nvim_set_hl(0, hl_name, color_def)
+    else
+      -- Link to default highlight group
+      local default_hl = config.colors[change_type]
+      vim.api.nvim_set_hl(0, hl_name, { link = default_hl })
+    end
+  end
+  
+  state.highlight_groups_created = true
+end
 
 -- Initialize signs
 local function init_signs()
+  -- Create highlight groups first
+  create_highlight_groups()
+  
   for _, sign in pairs(signs) do
     if config.sign_text_utf8 then
       if sign.name == 'ChangesAdd' then
@@ -60,6 +102,79 @@ local function init_signs()
       linehl = config.linehi_diff and sign.texthl or '',
     })
   end
+end
+
+-- Function to update colors dynamically
+function M.set_colors(colors)
+  if colors.custom_colors then
+    config.custom_colors = vim.tbl_deep_extend('force', config.custom_colors, colors.custom_colors)
+  end
+  if colors.colors then
+    config.colors = vim.tbl_deep_extend('force', config.colors, colors.colors)
+  end
+  
+  -- Recreate highlight groups
+  state.highlight_groups_created = false
+  create_highlight_groups()
+  
+  -- Reinitialize signs
+  init_signs()
+  
+  -- Update all enabled buffers
+  for bufnr, _ in pairs(state.enabled_buffers) do
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      vim.schedule(function()
+        update_changes(bufnr)
+      end)
+    end
+  end
+end
+
+-- Preset color schemes
+local color_presets = {
+  default = {
+    custom_colors = {}
+  },
+  bright = {
+    custom_colors = {
+      add = { fg = "#00ff00", bg = "NONE", bold = true },
+      delete = { fg = "#ff0000", bg = "NONE", bold = true },
+      modified = { fg = "#ffff00", bg = "NONE", bold = true }
+    }
+  },
+  subtle = {
+    custom_colors = {
+      add = { fg = "#90ee90", bg = "NONE" },
+      delete = { fg = "#ffb6c1", bg = "NONE" },
+      modified = { fg = "#87ceeb", bg = "NONE" }
+    }
+  },
+  neon = {
+    custom_colors = {
+      add = { fg = "#39ff14", bg = "NONE", bold = true },
+      delete = { fg = "#ff073a", bg = "NONE", bold = true },
+      modified = { fg = "#00ffff", bg = "NONE", bold = true }
+    }
+  },
+  ocean = {
+    custom_colors = {
+      add = { fg = "#66d9cc", bg = "NONE" },
+      delete = { fg = "#ff6b8a", bg = "NONE" },
+      modified = { fg = "#4fb3d9", bg = "NONE" }
+    }
+  }
+}
+
+-- Apply color preset
+function M.apply_preset(preset_name)
+  local preset = color_presets[preset_name]
+  if not preset then
+    vim.notify('Unknown color preset: ' .. preset_name, vim.log.levels.ERROR)
+    return
+  end
+  
+  M.set_colors(preset)
+  vim.notify('Applied color preset: ' .. preset_name, vim.log.levels.INFO)
 end
 
 -- Get file content from VCS if enabled
@@ -240,7 +355,7 @@ local function place_signs(bufnr, changes)
 end
 
 -- Update changes for a buffer
-local function update_changes(bufnr)
+function update_changes(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   
   if not state.enabled_buffers[bufnr] then
@@ -507,6 +622,22 @@ function M.setup(opts)
   vim.api.nvim_create_user_command('ChangesDiff', function()
     M.show_diff()
   end, { desc = 'Show diff in split' })
+  
+  -- Color preset commands
+  vim.api.nvim_create_user_command('ChangesColorPreset', function(args)
+    M.apply_preset(args.args)
+  end, { 
+    desc = 'Apply color preset',
+    nargs = 1,
+    complete = function()
+      return vim.tbl_keys(color_presets)
+    end
+  })
+  
+  vim.api.nvim_create_user_command('ChangesListPresets', function()
+    local presets = vim.tbl_keys(color_presets)
+    vim.notify('Available presets: ' .. table.concat(presets, ', '), vim.log.levels.INFO)
+  end, { desc = 'List available color presets' })
   
   -- Create keymaps (similar to original plugin)
   vim.keymap.set('n', ']h', M.next_change, { desc = 'Next change' })
