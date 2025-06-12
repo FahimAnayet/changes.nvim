@@ -38,8 +38,8 @@ use {
 | Option | Default | Description |
 |--------|---------|-------------|
 | `autocmd` | `true` | Auto-update signs using TextChanged events |
-| `vcs_check` | `false` | Check against VCS (git/hg) instead of saved file |
-| `vcs_system` | `''` | VCS system to use ('git', 'hg', or '' for auto-detect) |
+| `vcs_check` | `false` | **DEFAULT: Compare with saved file on disk. Set to `true` to compare with VCS (git/hg) instead** |
+| `vcs_system` | `''` | VCS system to use ('git', 'hg', or '' for auto-detect). Only used when `vcs_check = true` |
 | `diff_preview` | `false` | Show diff in preview window |
 | `respect_signcolumn` | `false` | Use SignColumn highlighting |
 | `sign_text_utf8` | `true` | Use UTF-8 symbols for signs |
@@ -88,18 +88,39 @@ changes.show_changes_qf()  -- Show changes in quickfix
 changes.show_diff()        -- Show diff in split
 ```
 
-## Features
+## Working Without Git/VCS
 
-- ✅ Visual indicators for added, modified, and deleted lines
-- ✅ Git/Mercurial integration
-- ✅ Automatic sign updates on text changes
-- ✅ Jump between changes with `]h` and `[h`
-- ✅ Quickfix integration
-- ✅ Diff view in split window
-- ✅ Customizable signs and colors
-- ✅ UTF-8 and icon support
-- ✅ Per-buffer enable/disable
-- ✅ Async updates (using vim.schedule)
+**The plugin works perfectly without any version control system!**
+
+### Default Behavior (No VCS needed):
+- **Compares**: Current buffer content vs. saved file on disk
+- **Shows changes**: Any unsaved modifications you've made
+- **Works with**: Any file that exists on your filesystem
+- **Use case**: Perfect for editing any file and seeing what you've changed before saving
+
+### Example for non-git files:
+```lua
+-- This is the default setup - no VCS required!
+require('changes').setup({
+  vcs_check = false,  -- This is the default - compare with saved file
+})
+
+-- Now open any file and start editing:
+-- 1. Open: vim ~/my-document.txt
+-- 2. Make changes
+-- 3. See visual indicators showing your unsaved changes
+-- 4. Save with :w to update the baseline
+```
+
+### VCS Mode (Optional):
+Only enable VCS mode if you want to compare against git/hg commits instead of the saved file:
+
+```lua
+require('changes').setup({
+  vcs_check = true,     -- Enable VCS mode
+  vcs_system = 'git',   -- or 'hg', or '' for auto-detect
+})
+```
 
 ## Differences from Original Plugin
 

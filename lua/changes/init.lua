@@ -64,21 +64,38 @@ end
 
 -- Get file content from VCS if enabled
 local function get_vcs_content(filepath)
-  if not config.vcs_check or config.vcs_system == '' then
+  if not config.vcs_check then
     return nil
   end
   
   local cmd
-  if config.vcs_system == 'git' or (config.vcs_system == '' and vim.fn.isdirectory('.git') == 1) then
+  local vcs_system = config.vcs_system
+  
+  -- Auto-detect VCS if not specified
+  if vcs_system == '' then
+    if vim.fn.isdirectory('.git') == 1 then
+      vcs_system = 'git'
+    elseif vim.fn.isdirectory('.hg') == 1 then
+      vcs_system = 'hg'
+    else
+      -- No VCS found, return nil to fall back to file content
+      return nil
+    end
+  end
+  
+  if vcs_system == 'git' then
     cmd = {'git', 'show', 'HEAD:' .. vim.fn.fnamemodify(filepath, ':.')}
-  elseif config.vcs_system == 'hg' or (config.vcs_system == '' and vim.fn.isdirectory('.hg') == 1) then
+  elseif vcs_system == 'hg' then
     cmd = {'hg', 'cat', '-r', '.', filepath}
   else
     return nil
   end
   
-  local result = vim.system(cmd, { text = true }):wait()
-  if result.code == 0 then
+  local ok, result = pcall(function()
+    return vim.system(cmd, { text = true }):wait()
+  end)
+  
+  if ok and result.code == 0 then
     return vim.split(result.stdout, '\n')
   end
   return nil
@@ -87,17 +104,26 @@ end
 -- Get original file content
 local function get_original_content(bufnr)
   local filepath = vim.api.nvim_buf_get_name(bufnr)
-  if filepath == '' then return nil end
-  
-  -- Try VCS first if enabled
-  local vcs_content = get_vcs_content(filepath)
-  if vcs_content then
-    return vcs_content
+  if filepath == '' then 
+    -- For unnamed buffers, we can't compare changes
+    return nil 
   end
   
-  -- Fall back to saved file content
+  -- Try VCS first if enabled
+  if config.vcs_check then
+    local vcs_content = get_vcs_content(filepath)
+    if vcs_content then
+      return vcs_content
+    end
+    -- If VCS is enabled but fails, still fall back to file content
+  end
+  
+  -- Use saved file content (works without any VCS)
   if vim.fn.filereadable(filepath) == 1 then
-    return vim.fn.readfile(filepath)
+    local ok, content = pcall(vim.fn.readfile, filepath)
+    if ok then
+      return content
+    end
   end
   
   return nil
