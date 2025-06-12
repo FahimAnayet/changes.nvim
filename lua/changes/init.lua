@@ -129,7 +129,7 @@ local function get_original_content(bufnr)
   return nil
 end
 
--- Calculate diff between original and current content
+-- Calculate diff between original and current content using Vim's diff
 local function calculate_diff(original_lines, current_lines)
   local changes = {}
   
@@ -137,37 +137,78 @@ local function calculate_diff(original_lines, current_lines)
     return changes
   end
   
-  -- Simple line-by-line comparison for now
-  -- This is more reliable than external diff command
-  local max_lines = math.max(#original_lines, #current_lines)
+  -- Create temporary buffers for diff
+  local orig_buf = vim.api.nvim_create_buf(false, true)
+  local curr_buf = vim.api.nvim_create_buf(false, true)
   
-  for i = 1, max_lines do
-    local original_line = original_lines[i] or ''
-    local current_line = current_lines[i] or ''
-    
-    if i > #original_lines then
-      -- Line was added
-      changes[i] = 'add'
-    elseif i > #current_lines then
-      -- Line was deleted (mark the previous line)
-      if i > 1 then
-        changes[i - 1] = 'delete'
+  -- Set buffer contents
+  vim.api.nvim_buf_set_lines(orig_buf, 0, -1, false, original_lines)
+  vim.api.nvim_buf_set_lines(curr_buf, 0, -1, false, current_lines)
+  
+  -- Use vim's internal diff
+  local ok, diff_result = pcall(function()
+    return vim.diff(table.concat(original_lines, '\n'), table.concat(current_lines, '\n'), {
+      result_type = 'indices',
+      algorithm = 'myers',
+    })
+  end)
+  
+  -- Clean up temporary buffers
+  vim.api.nvim_buf_delete(orig_buf, { force = true })
+  vim.api.nvim_buf_delete(curr_buf, { force = true })
+  
+  if not ok or not diff_result then
+    -- Fallback to simple comparison if vim.diff fails
+    local min_lines = math.min(#original_lines, #current_lines)
+    for i = 1, min_lines do
+      if original_lines[i] ~= current_lines[i] then
+        changes[i] = 'modified'
       end
-    elseif original_line ~= current_line then
-      -- Line was modified
-      changes[i] = 'modified'
+    end
+    
+    -- Handle added lines
+    for i = min_lines + 1, #current_lines do
+      changes[i] = 'add'
+    end
+    
+    -- Handle deleted lines
+    if #original_lines > #current_lines and #current_lines > 0 then
+      changes[#current_lines] = 'delete'
+    end
+    
+    return changes
+  end
+  
+  -- Process diff result
+  for _, diff in ipairs(diff_result) do
+    local orig_start, orig_count, curr_start, curr_count = diff[1], diff[2], diff[3], diff[4]
+    
+    if orig_count == 0 then
+      -- Lines were added
+      for i = curr_start, curr_start + curr_count - 1 do
+        if i >= 1 and i <= #current_lines then
+          changes[i] = 'add'
+        end
+      end
+    elseif curr_count == 0 then
+      -- Lines were deleted
+      local delete_line = curr_start
+      if delete_line < 1 then delete_line = 1 end
+      if delete_line > #current_lines then delete_line = #current_lines end
+      if delete_line >= 1 and #current_lines > 0 then
+        changes[delete_line] = 'delete'
+      end
+    else
+      -- Lines were modified
+      for i = curr_start, curr_start + curr_count - 1 do
+        if i >= 1 and i <= #current_lines then
+          changes[i] = 'modified'
+        end
+      end
     end
   end
   
-  -- Remove any invalid line numbers (should be >= 1)
-  local valid_changes = {}
-  for line_num, change_type in pairs(changes) do
-    if line_num >= 1 and line_num <= #current_lines then
-      valid_changes[line_num] = change_type
-    end
-  end
-  
-  return valid_changes
+  return changes
 end
 
 -- Place signs for changes
