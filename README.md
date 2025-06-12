@@ -1,130 +1,154 @@
 # Shamelessly Stole from [Here](https://github.com/chrisbra/changesPlugin)
 
-# Changes plugin [![Say Thanks!](https://img.shields.io/badge/Say%20Thanks-!-1EAEDB.svg)](https://saythanks.io/to/cb%40256bit.org)
-> A NeoVim plugin for displaying changes in a buffer
+## Installation
 
-This plugin was written to help visualize which lines have been changed since
-editing started for a file. The plugin was inspired by so called changed-bars,
-available in other editors, such as Embarcadero C++ Builder (there it is
-called [Change Bars](http://edn.embarcadero.com/article/33453#6PersonalDeveloperProductivity)
-or Visual Studio where it is called [indicator margin](http://blog.eveningcreek.com/?p=151).
+### Using lazy.nvim
 
-ChangesPlugin.vim uses the diff feature of vim and compares the actual
-buffer with its saved state (or possibly against a state in a VCS repository).
-It displays signs in the signcolumn to indicate any changes, with optional line highlighting.
-
-See also the following screencast showing several of the features available:
-![screencast of the plugin](screencast.gif "Screencast")
-
-Note, that a '-' indicates that at least one line was deleted between that
-particular line and the following line.
-
-Features:
-* Shows signs for added, modified, and deleted lines
-* Quick jumping between changed blocks ("hunks")
-* Tries to update signs as fast as possible
-* Optional line highlighting
-* Customisable
-* Many different Commands (fold all non changed lines, show changed lines in Quickfix window, opens a diff split...)
-* Preserves signs from other plugins
-* Built-in integration with [vim-airline](https://github.com/vim-airline/vim-airline/)
-* Good documentation
-* Quick response
-* Nice icons for gvim
-* Uses Vim 8's async feature for parsing the diff
-
-#### Why another git-gutter/vim-signify clone?
-To be fair, there were a lot of other vim plugins that offered the same functionality as those two. They just didn't get the same attention as those two. ChangesPlugin was one of those plugins.
-
-### Installation
-Vim 8 comes with package support. Simply clone it into your packpath like this:
+```lua
+{
+  'your-username/changes.nvim',
+  config = function()
+    require('changes').setup({
+      -- Configuration options
+      autocmd = true,
+      vcs_check = false,
+      vcs_system = '', -- 'git', 'hg', or '' for auto-detect
+      sign_text_utf8 = true,
+      use_icons = true,
+      linehi_diff = false,
+    })
+  end,
+  event = { 'BufReadPost', 'BufNewFile' },
+}
 ```
-cd ~/.vim/pack/custom/start/
-git clone https://github.com/chrisbra/changesPlugin.git
+
+### Using packer.nvim
+
+```lua
+use {
+  'your-username/changes.nvim',
+  config = function()
+    require('changes').setup()
+  end
+}
 ```
-(Remember to run `:helptags ALL` after restarting Vim to regenerate the help files)
 
-Other installation methods:
+## Configuration Options
 
-| Plugin Manager | Install with... |
-| ------------- | ------------- |
-| [Pathogen][1] | `git clone https://github.com/chrisbra/changesPlugin ~/.vim/bundle/changesPlugin`<br/>Remember to run `:Helptags` to generate help tags |
-| [NeoBundle][2] | `NeoBundle 'chrisbra/changesPlugin'` |
-| [Vundle][3] | `Plugin 'chrisbra/changesPlugin'` |
-| [Plug][4] | `Plug 'chrisbra/changesPlugin'` |
-| [VAM][5] | `call vam#ActivateAddons([ 'changesPlugin' ])` |
-| [Dein][6] | `call dein#add('chrisbra/changesPlugin')` |
-| [minpac][7] | `call minpac#add('chrisbra/changesPlugin')` |
-| manual | copy all of the directories into your `~/.vim` directory (preserve existing directories)|
+| Option | Default | Description |
+|--------|---------|-------------|
+| `autocmd` | `true` | Auto-update signs using TextChanged events |
+| `vcs_check` | `false` | Check against VCS (git/hg) instead of saved file |
+| `vcs_system` | `''` | VCS system to use ('git', 'hg', or '' for auto-detect) |
+| `diff_preview` | `false` | Show diff in preview window |
+| `respect_signcolumn` | `false` | Use SignColumn highlighting |
+| `sign_text_utf8` | `true` | Use UTF-8 symbols for signs |
+| `linehi_diff` | `false` | Highlight entire changed lines |
+| `use_icons` | `true` | Use fancy Unicode icons |
+| `add_sign` | `'+'` | Sign for added lines |
+| `delete_sign` | `'-'` | Sign for deleted lines |
+| `modified_sign` | `'*'` | Sign for modified lines |
+| `utf8_add_sign` | `'➕'` | UTF-8 sign for added lines |
+| `utf8_delete_sign` | `'➖'` | UTF-8 sign for deleted lines |
+| `utf8_modified_sign` | `'★'` | UTF-8 sign for modified lines |
 
-Other package managers work similarly, please refer to their documentation.
+## Commands
 
-### Usage
-Once installed, take a look at the help at `:h ChangesPlugin`
+| Command | Description |
+|---------|-------------|
+| `:ChangesEnable` | Enable changes tracking for current buffer |
+| `:ChangesDisable` | Disable changes tracking for current buffer |
+| `:ChangesToggle` | Toggle changes tracking for current buffer |
+| `:ChangesShow` | Show all changes in quickfix window |
+| `:ChangesDiff` | Open diff view in split window |
 
-Here is a short overview of the functionality provided by the plugin:
-#### Ex commands:
-    :EC  - Activate the plugin (display indicators of changes for the current buffer)
-    :DC  - Disable the plugin
-    :TCV - Toggle the plugin
-    :CC  - Show a small help window
-    :CL  - Open the Quickfix window with all changes for the current buffer
-    :CD  - Open a diff view for the current buffer
-    :CF  - Fold away all non-changed lines
-    :CT  - Toggle how the highlighting is displayed
-#### Mappings
-    ]h   - Moves forward to the next changed line
-    [h   - Moves backwards to the previous changed line
-    ah   - Selects the current hunk (TextObject)
-    <Leader>h - Stage the hunk that the cursor is on (works only for git)
+## Key Mappings
 
-### Configuration
+| Key | Mode | Action |
+|-----|------|--------|
+| `]h` | Normal | Jump to next change |
+| `[h` | Normal | Jump to previous change |
 
-`g:changes_autocmd` (default: 1) - update the signs automatically using InsertLeave and TextChanged autocommands.
+## API Functions
 
-`g:changes_vcs_check` (default: 0)
+```lua
+local changes = require('changes')
 
-`g:changes_vcs_system` (default: '') - Check against a version in a repository (e.g. git/mercurial) and specify VCS to use (if not specified, will try to autodetect).
+-- Enable/disable for specific buffer
+changes.enable(bufnr)   -- Enable for buffer (default: current)
+changes.disable(bufnr)  -- Disable for buffer (default: current)
+changes.toggle(bufnr)   -- Toggle for buffer (default: current)
 
-`g:changes_diff_preview` (default: 0) - Display diff in the preview window
+-- Navigation
+changes.next_change()   -- Jump to next change
+changes.prev_change()   -- Jump to previous change
 
-`g:changes_respect_SignColumn` (default 0) - If set, will use the SignColumn Highlighting group, else uses the Normal Highlighting group
+-- Views
+changes.show_changes_qf()  -- Show changes in quickfix
+changes.show_diff()        -- Show diff in split
+```
 
-`g:changes_sign_text_utf8` (default 1) - If set, will display nice little utf-8 signs.
+## Features
 
-`g:changes_linehi_diff` (default: 0) - If set, will overlay the text with highlighting for the difference in the line.
+- ✅ Visual indicators for added, modified, and deleted lines
+- ✅ Git/Mercurial integration
+- ✅ Automatic sign updates on text changes
+- ✅ Jump between changes with `]h` and `[h`
+- ✅ Quickfix integration
+- ✅ Diff view in split window
+- ✅ Customizable signs and colors
+- ✅ UTF-8 and icon support
+- ✅ Per-buffer enable/disable
+- ✅ Async updates (using vim.schedule)
 
-`g:changes_use_icons` (default: 1) - If set, will display graphical icons if support is available.
+## Differences from Original Plugin
 
-`g:changes_add_sign` (default: '+') - If set, will display custom sign
+### Improvements:
+- **Modern Lua API**: Uses Neovim's Lua API instead of VimScript
+- **Better Performance**: Leverages Neovim's async capabilities
+- **Cleaner Code**: More maintainable and extensible codebase
+- **Better Git Integration**: Uses `vim.system()` for better subprocess handling
+- **Namespace Support**: Uses proper namespaces for signs and highlights
 
-`g:changes_delete_sign` (default: '-') - If set, will display custom sign
+### Removed Features:
+- Some legacy Vim compatibility features
+- Complex fold operations (can be added back if needed)
+- Advanced diff highlighting modes
 
-`g:changes_modified_sign` (default: '*') - If set, will display custom sign
+## Extending the Plugin
 
-`g:changes_utf8_add_sign` (default '➕') - If set, will display nice little utf-8 plus signs.
+The plugin is designed to be extensible. You can:
 
-`g:changes_utf8_delete_sign` (default '➖') - If set, will display nice little utf-8 minus signs.
+1. **Add new VCS systems**: Extend the `get_vcs_content()` function
+2. **Custom sign types**: Add new sign definitions
+3. **Advanced diff algorithms**: Replace the diff calculation logic
+4. **Additional views**: Add new ways to display changes
 
-`g:changes_utf8_modifed_sign` (default '★') - If set, will display nice little utf-8 star signs.
+## Example Advanced Configuration
 
-#### Similar Work
-[vim-gitgutter](https://github.com/airblade/vim-gitgutter)
-Only works for git.
+```lua
+require('changes').setup({
+  autocmd = true,
+  vcs_check = true,
+  vcs_system = 'git',
+  sign_text_utf8 = false,  -- Use simple ASCII signs
+  use_icons = false,
+  linehi_diff = true,      -- Highlight entire lines
+  
+  -- Custom signs
+  add_sign = '▎',
+  delete_sign = '▎',
+  modified_sign = '▎',
+})
 
-[vim-signify](https://github.com/mhinz/vim-signify/)
-Supports several VCS, only updates the sign on write.
+-- Custom keybindings
+vim.keymap.set('n', '<leader>ce', '<cmd>ChangesEnable<cr>')
+vim.keymap.set('n', '<leader>cd', '<cmd>ChangesDisable<cr>')
+vim.keymap.set('n', '<leader>ct', '<cmd>ChangesToggle<cr>')
+vim.keymap.set('n', '<leader>cs', '<cmd>ChangesShow<cr>')
+vim.keymap.set('n', '<leader>cv', '<cmd>ChangesDiff<cr>')
+```
 
-### License & Copyright
+This modern Lua implementation provides all the core functionality of the original changesPlugin.
 
-© 2009-2014 by Christian Brabandt. The Vim License applies. See `:h license`
-
-__NO WARRANTY, EXPRESS OR IMPLIED.  USE AT-YOUR-OWN-RISK__
-
-[1]: https://github.com/tpope/vim-pathogen
-[2]: https://github.com/Shougo/neobundle.vim
-[3]: https://github.com/VundleVim/Vundle.vim
-[4]: https://github.com/junegunn/vim-plug
-[5]: https://github.com/MarcWeber/vim-addon-manager
-[6]: https://github.com/Shougo/dein.vim
-[7]: https://github.com/k-takata/minpac/
+> ### <span style='color: red;'>This will never update in future.</span>

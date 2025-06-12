@@ -1,334 +1,419 @@
-local changes = {}
+-- changes.nvim - A Neovim plugin for displaying buffer changes
+-- Lua port of chrisbra/changesPlugin
 
--- Configuration
-changes.config = {
+local M = {}
+
+-- Default configuration
+local config = {
   autocmd = true,
   vcs_check = false,
-  vcs_system = nil,
-  fast = true,
-  sign_text_utf8 = false,
-  use_icons = true,
-  respect_signcolumn = false,
-  linehi_diff = false,
-  max_filesize = 0,
-  grep_diff = false,
+  vcs_system = '',
   diff_preview = false,
-  sign_hi_style = 0,
+  respect_signcolumn = false,
+  sign_text_utf8 = true,
+  linehi_diff = false,
+  use_icons = true,
   add_sign = '+',
   delete_sign = '-',
   modified_sign = '*',
   utf8_add_sign = '➕',
   utf8_delete_sign = '➖',
-  utf8_modified_sign = '★'
+  utf8_modified_sign = '★',
 }
 
--- State
-changes.state = {
-  msg = {},
-  ignore = {},
-  signs = {},
-  old_signs = {},
-  placed_signs = {},
-  diff_out = vim.fn.tempname(),
-  diff_in_cur = vim.fn.tempname(),
-  diff_in_old = vim.fn.tempname(),
-  jobid = 1,
-  nodiff = false,
-  changes_sign_hi_style = 0,
-  precheck = false,
-  changes_last_inserted_sign = nil,
-  jobs = {}
+-- State management
+local state = {
+  enabled_buffers = {},
+  original_content = {},
+  sign_group = 'changes_nvim',
+  namespace = vim.api.nvim_create_namespace('changes_nvim'),
 }
 
--- VCS commands
-changes.vcs_cat = {
-  git = 'show :',
-  bzr = 'cat ',
-  cvs = '-q update -p ',
-  darcs = '--show-contents ',
-  fossil = 'finfo -p ',
-  rcs = 'co -p ',
-  svn = 'cat ',
-  hg = 'cat ',
-  mercurial = 'cat ',
-  subversion = 'cat '
+-- Sign definitions
+local signs = {
+  add = { name = 'ChangesAdd', text = '+', texthl = 'DiffAdd' },
+  delete = { name = 'ChangesDelete', text = '-', texthl = 'DiffDelete' },
+  modified = { name = 'ChangesModified', text = '*', texthl = 'DiffChange' },
 }
 
-changes.vcs_diff = {
-  git = ' diff -U0 --no-ext-diff --no-color ',
-  hg = ' diff -U0 '
-}
-
-changes.vcs_apply = {
-  git = ' apply --cached --unidiff-zero ',
-  hg = ' import - '
-}
-
--- Helper functions
-local function store_message(msg)
-  table.insert(changes.state.msg, msg)
-end
-
-local function warning_msg()
-  if vim.o.verbose == 0 then return end
-  if #changes.state.msg > 0 then
-    vim.cmd('redraw!')
-    vim.cmd('echohl WarningMsg')
-    for _, m in ipairs(changes.state.msg) do
-      vim.cmd(string.format('echomsg "Changes.nvim: %s"', m))
-    end
-    vim.cmd('echohl Normal')
-    vim.v.errmsg = changes.state.msg[1]
-    changes.state.msg = {}
-  end
-end
-
-local function current_buffer_is_ignored()
-  return changes.state.ignore[vim.fn.bufnr()] or false
-end
-
-local function ignore_current_buffer()
-  changes.state.ignore[vim.fn.bufnr()] = true
-end
-
-local function unignore_current_buffer()
-  changes.state.ignore[vim.fn.bufnr()] = nil
-end
-
-local function set_sign_column()
-  if not changes.config.respect_signcolumn and vim.wo.signcolumn ~= 'yes' and vim.bo.buftype ~= 'terminal' then
-    vim.wo.signcolumn = 'yes'
-  end
-end
-
--- Sign management
-local function init_sign_def()
-  local signs = {}
-  local sign_hi = changes.state.changes_sign_hi_style
-  
-  local plus = changes.config.sign_text_utf8 and changes.config.utf8_add_sign or changes.config.add_sign
-  local del = changes.config.sign_text_utf8 and changes.config.utf8_delete_sign or changes.config.delete_sign
-  local mod = changes.config.sign_text_utf8 and changes.config.utf8_modified_sign or changes.config.modified_sign
-
-  signs.add = {
-    text = plus,
-    texthl = sign_hi < 2 and "ChangesSignTextAdd" or "SignColumn",
-    linehl = sign_hi > 0 and 'DiffAdd' or '',
-    name = 'add'
-  }
-
-  signs.del = {
-    text = del,
-    texthl = sign_hi < 2 and "ChangesSignTextDel" or "SignColumn",
-    linehl = sign_hi > 0 and 'DiffDelete' or '',
-    name = 'del'
-  }
-
-  signs.cha = {
-    text = mod,
-    texthl = sign_hi < 2 and "ChangesSignTextCh" or "SignColumn",
-    linehl = sign_hi > 0 and 'DiffChange' or '',
-    name = 'cha'
-  }
-
-  signs.add_dummy = {
-    text = plus,
-    texthl = sign_hi < 2 and "ChangesSignTextDummyAdd" or "SignColumn",
-    linehl = sign_hi > 0 and 'DiffAdd' or '',
-    name = 'add_dummy'
-  }
-
-  signs.cha_dummy = {
-    text = mod,
-    texthl = sign_hi < 2 and "ChangesSignTextDummyCh" or "SignColumn",
-    linehl = sign_hi > 0 and 'DiffChange' or '',
-    name = 'cha_dummy'
-  }
-
-  -- Remove empty values
-  for name, def in pairs(signs) do
-    for k, v in pairs(def) do
-      if v == '' then def[k] = nil end
-    end
-  end
-
-  return signs
-end
-
-local function define_signs(undef)
-  if undef then
-    for name, _ in pairs(changes.state.signs) do
-      vim.fn.sign_undefine(name)
-    end
-  end
-
-  for name, def in pairs(changes.state.signs) do
-    local ok, err = pcall(vim.fn.sign_define, name, def)
-    if not ok then
-      if string.find(err, "Can't read icons") then
-        def.icon = nil
-        vim.fn.sign_define(name, def)
+-- Initialize signs
+local function init_signs()
+  for _, sign in pairs(signs) do
+    if config.sign_text_utf8 then
+      if sign.name == 'ChangesAdd' then
+        sign.text = config.use_icons and config.utf8_add_sign or config.add_sign
+      elseif sign.name == 'ChangesDelete' then
+        sign.text = config.use_icons and config.utf8_delete_sign or config.delete_sign
+      elseif sign.name == 'ChangesModified' then
+        sign.text = config.use_icons and config.utf8_modified_sign or config.modified_sign
       end
-    end
-  end
-end
-
--- Diff functionality
-local function get_diff(arg, file)
-  if current_buffer_is_ignored() or vim.bo.buftype ~= '' or vim.fn.line2byte(vim.fn.line('$')) == -1 then
-    store_message('Buffer is ignored')
-    return
-  end
-
-  local _wsv = vim.fn.winsaveview()
-  vim.bo.lz = true
-
-  if not vim.fn.filereadable(vim.fn.bufname()) then
-    store_message("You've opened a new file so viewing changes is disabled until the file is saved")
-    return
-  end
-
-  if vim.fn.bufname() == '' then
-    store_message("The buffer does not contain a name. Aborted!")
-    return
-  end
-
-  if vim.bo.buftype ~= '' then
-    store_message("Not generating diff for special buffer!")
-    ignore_current_buffer()
-    return
-  end
-
-  vim.b.diffhl = {add = {}, del = {}, cha = {}}
-
-  if arg == 3 then
-    -- Diff mode implementation
-    -- Similar to the Vimscript version but in Lua
-  else
-    -- Parse diff output
-    -- Similar to the Vimscript version but in Lua
-  end
-
-  vim.fn.winrestview(_wsv)
-  warning_msg()
-end
-
--- Main functions
-function changes.setup(config)
-  changes.config = vim.tbl_extend('force', changes.config, config or {})
-end
-
-function changes.init()
-  changes.state.msg = {}
-  
-  -- Check preconditions
-  if not vim.o.diff then
-    store_message("Diff support not available in your Vim version.")
-    return false
-  end
-
-  if not vim.o.signs then
-    store_message("Sign Support not available in your Vim.")
-    return false
-  end
-
-  if vim.fn.executable("diff") == 0 then
-    store_message("No diff executable found")
-    return false
-  end
-
-  -- Initialize signs
-  changes.state.old_signs = changes.state.signs
-  changes.state.signs = init_sign_def()
-  
-  if changes.state.old_signs ~= changes.state.signs and next(changes.state.old_signs) ~= nil then
-    define_signs(true)
-  end
-
-  set_sign_column()
-  
-  if not vim.b.sign_prefix then
-    vim.b.sign_prefix = vim.fn.bufnr()
-  end
-
-  return true
-end
-
-function changes.enable(arg, file)
-  unignore_current_buffer()
-  local ok, err = pcall(function()
-    local savevar = changes.config.max_filesize
-    changes.config.max_filesize = 0
-    if changes.init() then
-      if arg then
-        -- Unplace all signs
-      end
-      get_diff(arg, file or '')
-    end
-    changes.config.max_filesize = savevar
-  end)
-  
-  if not ok then
-    warning_msg()
-    changes.cleanup()
-  end
-end
-
-function changes.cleanup()
-  -- Unplace all signs
-  -- Clean up state
-  vim.b.changes_view_enabled = false
-end
-
-function changes.toggle_view()
-  if vim.b.changes_view_enabled then
-    -- Unplace signs
-    vim.b.changes_view_enabled = false
-    print("Hiding changes since last save")
-  else
-    if changes.init() then
-      get_diff(1, '')
-      vim.b.changes_view_enabled = true
-      print("Showing changes since last save")
     else
-      warning_msg()
-      changes.cleanup()
+      if sign.name == 'ChangesAdd' then sign.text = config.add_sign
+      elseif sign.name == 'ChangesDelete' then sign.text = config.delete_sign
+      elseif sign.name == 'ChangesModified' then sign.text = config.modified_sign
+      end
     end
+    
+    vim.fn.sign_define(sign.name, {
+      text = sign.text,
+      texthl = config.respect_signcolumn and 'SignColumn' or sign.texthl,
+      linehl = config.linehi_diff and sign.texthl or '',
+    })
   end
 end
 
--- Set up autocommands
-local function setup_autocmds()
-  vim.cmd([[
-    augroup Changes
-      autocmd!
-      autocmd TextChanged,InsertLeave,FilterReadPost * lua require('changes').update_view()
-      autocmd ColorScheme,GUIEnter * lua require('changes').init()
-      autocmd FocusGained * lua require('changes').update_view(1)
-      autocmd InsertEnter * lua require('changes').insert_sign_on_enter()
-      autocmd BufWritePost,BufWinEnter * lua require('changes').update_view(1)
-      autocmd VimLeave * lua require('changes').delete_temp_files()
-    augroup END
-  ]])
+-- Get file content from VCS if enabled
+local function get_vcs_content(filepath)
+  if not config.vcs_check or config.vcs_system == '' then
+    return nil
+  end
+  
+  local cmd
+  if config.vcs_system == 'git' or (config.vcs_system == '' and vim.fn.isdirectory('.git') == 1) then
+    cmd = {'git', 'show', 'HEAD:' .. vim.fn.fnamemodify(filepath, ':.')}
+  elseif config.vcs_system == 'hg' or (config.vcs_system == '' and vim.fn.isdirectory('.hg') == 1) then
+    cmd = {'hg', 'cat', '-r', '.', filepath}
+  else
+    return nil
+  end
+  
+  local result = vim.system(cmd, { text = true }):wait()
+  if result.code == 0 then
+    return vim.split(result.stdout, '\n')
+  end
+  return nil
 end
 
-function changes.update_view(force)
-  -- Implementation similar to Vimscript version
+-- Get original file content
+local function get_original_content(bufnr)
+  local filepath = vim.api.nvim_buf_get_name(bufnr)
+  if filepath == '' then return nil end
+  
+  -- Try VCS first if enabled
+  local vcs_content = get_vcs_content(filepath)
+  if vcs_content then
+    return vcs_content
+  end
+  
+  -- Fall back to saved file content
+  if vim.fn.filereadable(filepath) == 1 then
+    return vim.fn.readfile(filepath)
+  end
+  
+  return nil
 end
 
-function changes.insert_sign_on_enter()
-  -- Implementation similar to Vimscript version
+-- Calculate diff between original and current content
+local function calculate_diff(original_lines, current_lines)
+  local changes = {}
+  
+  -- Use vim's diff algorithm
+  local original_file = vim.fn.tempname()
+  local current_file = vim.fn.tempname()
+  
+  vim.fn.writefile(original_lines or {}, original_file)
+  vim.fn.writefile(current_lines, current_file)
+  
+  local diff_cmd = {'diff', '-u', original_file, current_file}
+  local result = vim.system(diff_cmd, { text = true }):wait()
+  
+  -- Clean up temp files
+  vim.fn.delete(original_file)
+  vim.fn.delete(current_file)
+  
+  if result.stdout then
+    local lines = vim.split(result.stdout, '\n')
+    local current_line = 0
+    
+    for _, line in ipairs(lines) do
+      if line:match('^@@') then
+        local new_start = line:match('%+(%d+)')
+        if new_start then
+          current_line = tonumber(new_start)
+        end
+      elseif line:match('^%-') then
+        -- Deleted line
+        if current_line > 0 then
+          changes[current_line] = 'delete'
+        end
+      elseif line:match('^%+') then
+        -- Added line
+        changes[current_line] = 'add'
+        current_line = current_line + 1
+      elseif line:match('^%s') then
+        -- Unchanged line (context)
+        current_line = current_line + 1
+      end
+    end
+  end
+  
+  return changes
 end
 
-function changes.delete_temp_files()
-  -- Implementation similar to Vimscript version
+-- Place signs for changes
+local function place_signs(bufnr, changes)
+  -- Clear existing signs
+  vim.fn.sign_unplace(state.sign_group, { buffer = bufnr })
+  
+  for line_num, change_type in pairs(changes) do
+    local sign_name
+    if change_type == 'add' then
+      sign_name = 'ChangesAdd'
+    elseif change_type == 'delete' then
+      sign_name = 'ChangesDelete'
+    else
+      sign_name = 'ChangesModified'
+    end
+    
+    vim.fn.sign_place(0, state.sign_group, sign_name, bufnr, {
+      lnum = line_num,
+      priority = 10
+    })
+  end
 end
 
--- Export public functions
-changes.store_message = store_message
-changes.warning_msg = warning_msg
-changes.current_buffer_is_ignored = current_buffer_is_ignored
-changes.ignore_current_buffer = ignore_current_buffer
-changes.unignore_current_buffer = unignore_current_buffer
+-- Update changes for a buffer
+local function update_changes(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  
+  if not state.enabled_buffers[bufnr] then
+    return
+  end
+  
+  local current_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local original_lines = state.original_content[bufnr]
+  
+  if not original_lines then
+    original_lines = get_original_content(bufnr)
+    if original_lines then
+      state.original_content[bufnr] = original_lines
+    else
+      return
+    end
+  end
+  
+  local changes = calculate_diff(original_lines, current_lines)
+  place_signs(bufnr, changes)
+end
 
-return changes
+-- Enable changes tracking for buffer
+function M.enable(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  
+  if state.enabled_buffers[bufnr] then
+    return
+  end
+  
+  state.enabled_buffers[bufnr] = true
+  
+  -- Store original content
+  local original_content = get_original_content(bufnr)
+  if original_content then
+    state.original_content[bufnr] = original_content
+  end
+  
+  -- Set up autocommands for this buffer
+  if config.autocmd then
+    local group = vim.api.nvim_create_augroup('changes_nvim_' .. bufnr, { clear = true })
+    
+    vim.api.nvim_create_autocmd({'TextChanged', 'TextChangedI'}, {
+      buffer = bufnr,
+      group = group,
+      callback = function()
+        vim.schedule(function()
+          update_changes(bufnr)
+        end)
+      end,
+    })
+    
+    vim.api.nvim_create_autocmd('BufWritePost', {
+      buffer = bufnr,
+      group = group,
+      callback = function()
+        -- Update original content after save
+        local new_original = get_original_content(bufnr)
+        if new_original then
+          state.original_content[bufnr] = new_original
+        end
+        update_changes(bufnr)
+      end,
+    })
+    
+    vim.api.nvim_create_autocmd('BufDelete', {
+      buffer = bufnr,
+      group = group,
+      callback = function()
+        M.disable(bufnr)
+      end,
+    })
+  end
+  
+  -- Initial update
+  update_changes(bufnr)
+end
+
+-- Disable changes tracking for buffer
+function M.disable(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  
+  state.enabled_buffers[bufnr] = nil
+  state.original_content[bufnr] = nil
+  
+  -- Clear signs
+  vim.fn.sign_unplace(state.sign_group, { buffer = bufnr })
+  
+  -- Clear autocommands
+  local group_name = 'changes_nvim_' .. bufnr
+  pcall(vim.api.nvim_del_augroup_by_name, group_name)
+end
+
+-- Toggle changes tracking
+function M.toggle(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  
+  if state.enabled_buffers[bufnr] then
+    M.disable(bufnr)
+  else
+    M.enable(bufnr)
+  end
+end
+
+-- Jump to next change
+function M.next_change()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local current_line = vim.api.nvim_win_get_cursor(0)[1]
+  
+  local signs = vim.fn.sign_getplaced(bufnr, { group = state.sign_group })[1]
+  if not signs or not signs.signs then return end
+  
+  local next_line = nil
+  for _, sign in ipairs(signs.signs) do
+    if sign.lnum > current_line then
+      if not next_line or sign.lnum < next_line then
+        next_line = sign.lnum
+      end
+    end
+  end
+  
+  -- Wrap to beginning if no next change found
+  if not next_line and #signs.signs > 0 then
+    next_line = signs.signs[1].lnum
+  end
+  
+  if next_line then
+    vim.api.nvim_win_set_cursor(0, { next_line, 0 })
+  end
+end
+
+-- Jump to previous change
+function M.prev_change()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local current_line = vim.api.nvim_win_get_cursor(0)[1]
+  
+  local signs = vim.fn.sign_getplaced(bufnr, { group = state.sign_group })[1]
+  if not signs or not signs.signs then return end
+  
+  local prev_line = nil
+  for _, sign in ipairs(signs.signs) do
+    if sign.lnum < current_line then
+      if not prev_line or sign.lnum > prev_line then
+        prev_line = sign.lnum
+      end
+    end
+  end
+  
+  -- Wrap to end if no previous change found
+  if not prev_line and #signs.signs > 0 then
+    prev_line = signs.signs[#signs.signs].lnum
+  end
+  
+  if prev_line then
+    vim.api.nvim_win_set_cursor(0, { prev_line, 0 })
+  end
+end
+
+-- Show changes in quickfix
+function M.show_changes_qf()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local signs = vim.fn.sign_getplaced(bufnr, { group = state.sign_group })[1]
+  
+  if not signs or not signs.signs then
+    vim.notify('No changes found', vim.log.levels.INFO)
+    return
+  end
+  
+  local qf_list = {}
+  local filename = vim.api.nvim_buf_get_name(bufnr)
+  
+  for _, sign in ipairs(signs.signs) do
+    local line_content = vim.api.nvim_buf_get_lines(bufnr, sign.lnum - 1, sign.lnum, false)[1] or ''
+    table.insert(qf_list, {
+      bufnr = bufnr,
+      filename = filename,
+      lnum = sign.lnum,
+      text = string.format('[%s] %s', sign.name:gsub('Changes', ''), line_content),
+    })
+  end
+  
+  vim.fn.setqflist(qf_list)
+  vim.cmd('copen')
+end
+
+-- Show diff in split
+function M.show_diff()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local original_lines = state.original_content[bufnr]
+  
+  if not original_lines then
+    vim.notify('No original content available', vim.log.levels.WARN)
+    return
+  end
+  
+  -- Create temporary buffer with original content
+  local temp_buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(temp_buf, 0, -1, false, original_lines)
+  vim.api.nvim_buf_set_option(temp_buf, 'buftype', 'nofile')
+  vim.api.nvim_buf_set_option(temp_buf, 'bufhidden', 'wipe')
+  
+  -- Split and show diff
+  vim.cmd('split')
+  local win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(win, temp_buf)
+  vim.cmd('diffthis')
+  vim.cmd('wincmd p')
+  vim.cmd('diffthis')
+end
+
+-- Setup function
+function M.setup(opts)
+  config = vim.tbl_deep_extend('force', config, opts or {})
+  
+  init_signs()
+  
+  -- Create commands
+  vim.api.nvim_create_user_command('ChangesEnable', function()
+    M.enable()
+  end, { desc = 'Enable changes tracking' })
+  
+  vim.api.nvim_create_user_command('ChangesDisable', function()
+    M.disable()
+  end, { desc = 'Disable changes tracking' })
+  
+  vim.api.nvim_create_user_command('ChangesToggle', function()
+    M.toggle()
+  end, { desc = 'Toggle changes tracking' })
+  
+  vim.api.nvim_create_user_command('ChangesShow', function()
+    M.show_changes_qf()
+  end, { desc = 'Show changes in quickfix' })
+  
+  vim.api.nvim_create_user_command('ChangesDiff', function()
+    M.show_diff()
+  end, { desc = 'Show diff in split' })
+  
+  -- Create keymaps (similar to original plugin)
+  vim.keymap.set('n', ']h', M.next_change, { desc = 'Next change' })
+  vim.keymap.set('n', '[h', M.prev_change, { desc = 'Previous change' })
+end
+
+return M
